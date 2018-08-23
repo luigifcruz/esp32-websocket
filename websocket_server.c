@@ -9,6 +9,7 @@
 static SemaphoreHandle_t xwebsocket_mutex; // to lock the client array
 static QueueHandle_t xwebsocket_queue; // to hold the clients that send messages
 static ws_client_t clients[WEBSOCKET_SERVER_MAX_CLIENTS]; // holds list of clients
+static void* task = NULL;
 static TaskHandle_t xtask; // the task itself
 
 static void background_callback(struct netconn* conn, enum netconn_evt evt,u16_t len) {
@@ -37,23 +38,23 @@ static void handle_read(uint8_t num) {
     case WEBSOCKET_OPCODE_CONT:
       break;
     case WEBSOCKET_OPCODE_BIN:
-      clients[num].scallback(num,WEBSOCKET_BIN,msg,header.length);
+      clients[num].scallback(num,WEBSOCKET_BIN,msg,header.length,task);
       break;
     case WEBSOCKET_OPCODE_TEXT:
-      clients[num].scallback(num,WEBSOCKET_TEXT,msg,header.length);
+      clients[num].scallback(num,WEBSOCKET_TEXT,msg,header.length,task);
       break;
     case WEBSOCKET_OPCODE_PING:
       ws_send(&clients[num],WEBSOCKET_OPCODE_PONG,msg,header.length,0);
-      clients[num].scallback(num,WEBSOCKET_PING,msg,header.length);
+      clients[num].scallback(num,WEBSOCKET_PING,msg,header.length,task);
       break;
     case WEBSOCKET_OPCODE_PONG:
       if(clients[num].ping) {
-        clients[num].scallback(num,WEBSOCKET_PONG,NULL,0);
+        clients[num].scallback(num,WEBSOCKET_PONG,NULL,0,task);
         clients[num].ping = 0;
       }
       break;
     case WEBSOCKET_OPCODE_CLOSE:
-      clients[num].scallback(num,WEBSOCKET_DISCONNECT_EXTERNAL,NULL,0);
+      clients[num].scallback(num,WEBSOCKET_DISCONNECT_EXTERNAL,NULL,0,task);
       ws_disconnect_client(&clients[num], 0);
       break;
     default:
@@ -67,6 +68,7 @@ static void ws_server_task(void* pvParameters) {
 
   xwebsocket_mutex = xSemaphoreCreateMutex();
   xwebsocket_queue = xQueueCreate(WEBSOCKET_SERVER_QUEUE_SIZE, sizeof(struct netconn*));
+  task = pvParameters;
 
   // initialize all clients
   for(int i=0;i<WEBSOCKET_SERVER_MAX_CLIENTS;i++) {
@@ -96,7 +98,7 @@ static void ws_server_task(void* pvParameters) {
   vTaskDelete(NULL);
 }
 
-int ws_server_start() {
+int ws_server_start(void* parameter) {
   if(xtask) return 0;
   #if WEBSOCKET_SERVER_PINNED
   xTaskCreatePinnedToCore(&ws_server_task,
@@ -110,7 +112,7 @@ int ws_server_start() {
   xTaskCreate(&ws_server_task,
               "ws_server_task",
               WEBSOCKET_SERVER_TASK_STACK_DEPTH,
-              NULL,
+              parameter,
               WEBSOCKET_SERVER_TASK_PRIORITY,
               &xtask);
   #endif
@@ -166,7 +168,8 @@ int ws_server_add_client_protocol(struct netconn* conn,
                          void (*callback)(uint8_t num,
                                           WEBSOCKET_TYPE_t type,
                                           char* msg,
-                                          uint64_t len)) {
+                                          uint64_t len,
+                                          void* parameter)) {
   int ret;
   char handshake[256];
 
@@ -184,10 +187,10 @@ int ws_server_add_client_protocol(struct netconn* conn,
 
   for(int i=0;i<WEBSOCKET_SERVER_MAX_CLIENTS;i++) {
     if(clients[i].conn) continue;
-    callback(i,WEBSOCKET_CONNECT,NULL,0);
+    callback(i,WEBSOCKET_CONNECT,NULL,0,task);
     clients[i] = ws_connect_client(conn,url,NULL,callback);
     if(!ws_is_connected(clients[i])) {
-      callback(i,WEBSOCKET_DISCONNECT_ERROR,NULL,0);
+      callback(i,WEBSOCKET_DISCONNECT_ERROR,NULL,0,task);
       ws_disconnect_client(&clients[i], 0);
       break;
     }
@@ -216,7 +219,8 @@ int ws_server_add_client(struct netconn* conn,
                          void (*callback)(uint8_t num,
                                           WEBSOCKET_TYPE_t type,
                                           char* msg,
-                                          uint64_t len)) {
+                                          uint64_t len,
+                                          void* parameter)) {
 
   return ws_server_add_client_protocol(conn,msg,len,url,NULL,callback);
 
@@ -237,7 +241,7 @@ int ws_server_remove_client(int num) {
   int ret = 0;
   xSemaphoreTake(xwebsocket_mutex,portMAX_DELAY);
   if(ws_is_connected(clients[num])) {
-    clients[num].scallback(num,WEBSOCKET_DISCONNECT_INTERNAL,NULL,0);
+    clients[num].scallback(num,WEBSOCKET_DISCONNECT_INTERNAL,NULL,0,task);
     ws_disconnect_client(&clients[num], 0);
     ret = 1;
   }
@@ -250,7 +254,7 @@ int ws_server_remove_clients(char* url) {
   xSemaphoreTake(xwebsocket_mutex,portMAX_DELAY);
   for(int i=0;i<WEBSOCKET_SERVER_MAX_CLIENTS;i++) {
     if(ws_is_connected(clients[i]) && strcmp(url,clients[i].url)) {
-      clients[i].scallback(i,WEBSOCKET_DISCONNECT_INTERNAL,NULL,0);
+      clients[i].scallback(i,WEBSOCKET_DISCONNECT_INTERNAL,NULL,0,task);
       ws_disconnect_client(&clients[i], 0);
       ret += 1;
     }
@@ -264,7 +268,7 @@ int ws_server_remove_all() {
   xSemaphoreTake(xwebsocket_mutex,portMAX_DELAY);
   for(int i=0;i<WEBSOCKET_SERVER_MAX_CLIENTS;i++) {
     if(ws_is_connected(clients[i])) {
-      clients[i].scallback(i,WEBSOCKET_DISCONNECT_INTERNAL,NULL,0);
+      clients[i].scallback(i,WEBSOCKET_DISCONNECT_INTERNAL,NULL,0,task);
       ws_disconnect_client(&clients[i], 0);
       ret += 1;
     }
@@ -305,7 +309,7 @@ int ws_server_send_text_client_from_callback(int num,char* msg,uint64_t len) {
     ws_send(&clients[num],WEBSOCKET_OPCODE_TEXT,msg,len,0);
     ret = 1;
     if(!ws_is_connected(clients[num])) {
-      clients[num].scallback(num,WEBSOCKET_DISCONNECT_ERROR,NULL,0);
+      clients[num].scallback(num,WEBSOCKET_DISCONNECT_ERROR,NULL,0,task);
       ws_disconnect_client(&clients[num], 0);
       ret = 0;
     }
@@ -320,7 +324,7 @@ int ws_server_send_text_clients_from_callback(char* url,char* msg,uint64_t len) 
       ws_send(&clients[i],WEBSOCKET_OPCODE_TEXT,msg,len,0);
       if(ws_is_connected(clients[i])) ret += 1;
       else {
-        clients[i].scallback(i,WEBSOCKET_DISCONNECT_ERROR,NULL,0);
+        clients[i].scallback(i,WEBSOCKET_DISCONNECT_ERROR,NULL,0,task);
         ws_disconnect_client(&clients[i], 0);
       }
     }
@@ -335,7 +339,7 @@ int ws_server_send_text_all_from_callback(char* msg,uint64_t len) {
       ws_send(&clients[i],WEBSOCKET_OPCODE_TEXT,msg,len,0);
       if(ws_is_connected(clients[i])) ret += 1;
       else {
-        clients[i].scallback(i,WEBSOCKET_DISCONNECT_ERROR,NULL,0);
+        clients[i].scallback(i,WEBSOCKET_DISCONNECT_ERROR,NULL,0,task);
         ws_disconnect_client(&clients[i], 0);
       }
     }

@@ -63,8 +63,8 @@ typedef struct {
   bool contin_text;     // is the continue a binary or text?
   uint64_t len;         // length of continuation
   uint32_t unfinished;      // sometimes netconn doesn't read a full frame, treated similarly to a continuation frame
-  void (*ccallback)(WEBSOCKET_TYPE_t type,char* msg,uint64_t len); // client callback
-  void (*scallback)(uint8_t num,WEBSOCKET_TYPE_t type,char* msg,uint64_t len); // server callback
+  void (*ccallback)(WEBSOCKET_TYPE_t type,char* msg,uint64_t len,void* parameter); // client callback
+  void (*scallback)(uint8_t num,WEBSOCKET_TYPE_t type,char* msg,uint64_t len,void* parameter); // server callback
 } ws_client_t;
 
 // returns the populated client struct
@@ -73,8 +73,8 @@ typedef struct {
 // scallback = callback for server (userspace)
 ws_client_t ws_connect_client(struct netconn* conn,
                               char* url,
-                              void (*ccallback)(WEBSOCKET_TYPE_t type,char* msg,uint64_t len),
-                              void (*scallback)(uint8_t num,WEBSOCKET_TYPE_t type,char* msg,uint64_t len)
+                              void (*ccallback)(WEBSOCKET_TYPE_t type,char* msg,uint64_t len,void* parameter),
+                              void (*scallback)(uint8_t num,WEBSOCKET_TYPE_t type,char* msg,uint64_t len,void* parameter)
                              );
 void ws_disconnect_client(ws_client_t* client,bool mask);
 bool ws_is_connected(ws_client_t client); // returns 1 if connected, status updates after send/read/connect/disconnect

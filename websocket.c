@@ -8,8 +8,8 @@
 
 ws_client_t ws_connect_client(struct netconn* conn,
                               char* url,
-                              void (*ccallback)(WEBSOCKET_TYPE_t type,char* msg,uint64_t len),
-                              void (*scallback)(uint8_t num,WEBSOCKET_TYPE_t type,char* msg,uint64_t len)
+                              void (*ccallback)(WEBSOCKET_TYPE_t type,char* msg,uint64_t len,void* parameter),
+                              void (*scallback)(uint8_t num,WEBSOCKET_TYPE_t type,char* msg,uint64_t len,void* parameter)
                             ) {
   ws_client_t client;
   client.conn = conn;

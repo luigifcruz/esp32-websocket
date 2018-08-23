@@ -18,7 +18,7 @@ extern "C" {
 #endif
 
 // starts the server
-int ws_server_start();
+int ws_server_start(void* parameter);
 
 // ends the server
 int ws_server_stop();
@@ -31,7 +31,8 @@ int ws_server_add_client(struct netconn* conn,
                          void (*callback)(uint8_t num,
                                           WEBSOCKET_TYPE_t type,
                                           char* msg,
-                                          uint64_t len));
+                                          uint64_t len,
+                                          void* parameter));
 
 int ws_server_add_client_protocol(struct netconn* conn,
                                   char* msg,
@@ -41,7 +42,8 @@ int ws_server_add_client_protocol(struct netconn* conn,
                                   void (*callback)(uint8_t num,
                                                    WEBSOCKET_TYPE_t type,
                                                    char* msg,
-                                                   uint64_t len));
+                                                   uint64_t len,
+                                                   void* parameter));
 
 int ws_server_len_url(char* url); // returns the number of connected clients to url
 int ws_server_len_all(); // returns the total number of connected clients
